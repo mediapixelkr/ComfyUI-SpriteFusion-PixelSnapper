@@ -17,6 +17,7 @@ use wasm_bindgen::prelude::*;
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Config {
     pub k_colors: usize,
+    pub pixel_size_override: Option<f64>,
     k_seed: u64,
     /// Input image path only used for CLI use
     #[allow(dead_code)]
@@ -33,7 +34,6 @@ pub struct Config {
     min_cuts_per_axis: usize,
     fallback_target_segments: usize,
     max_step_ratio: f64,
-    pub pixel_size_override: Option<f64>,
 }
 
 impl Default for Config {
@@ -108,10 +108,11 @@ fn process_image_bytes_common(input_bytes: &[u8], config: Option<Config>) -> Res
     validate_image_dimensions(width, height)?;
 
     if let Some(px) = config.pixel_size_override {
-        if px < 1.0 || px > (width.min(height) as f64 / 2.0) {
+        if !px.is_finite() || px < 1.0 || px > (width.min(height) as f64 / 2.0) {
             return Err(PixelSnapperError::InvalidInput(format!(
                 "pixel_size_override {:.1} is out of valid range [1, {}]",
-                px, width.min(height) / 2
+                px,
+                width.min(height) / 2
             )));
         }
     }
@@ -128,8 +129,15 @@ fn process_image_bytes_common(input_bytes: &[u8], config: Option<Config>) -> Res
     // Resolve step sizes. Some instabilities so use sibling axis if one fails, or fallback if both fail
     let (step_x, step_y) = resolve_step_sizes(step_x_opt, step_y_opt, width, height, &config);
 
-    println!("Pixel size: {:.1}px ({})", step_x,
-        if config.pixel_size_override.is_some() { "override" } else { "auto-detected" });
+    println!(
+        "Pixel size: {:.1}px ({})",
+        step_x,
+        if config.pixel_size_override.is_some() {
+            "override"
+        } else {
+            "auto-detected"
+        }
+    );
 
     let raw_col_cuts = walk(&profile_x, step_x, width as usize, &config)?;
     let raw_row_cuts = walk(&profile_y, step_y, height as usize, &config)?;
@@ -165,6 +173,7 @@ fn process_image_bytes_common(input_bytes: &[u8], config: Option<Config>) -> Res
 pub fn process_image(
     input_bytes: &[u8],
     k_colors: Option<u32>,
+    pixel_size_override: Option<f64>,
 ) -> std::result::Result<Vec<u8>, wasm_bindgen::JsValue> {
     let mut config = Config::default();
     if let Some(k) = k_colors {
@@ -175,6 +184,8 @@ pub fn process_image(
         }
         config.k_colors = k as usize;
     }
+    
+    config.pixel_size_override = pixel_size_override;
 
     process_image_bytes_common(input_bytes, Some(config))
         .map_err(|e| wasm_bindgen::JsValue::from(e))

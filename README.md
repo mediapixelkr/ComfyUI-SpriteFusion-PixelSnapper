@@ -74,7 +74,18 @@ Build the WASM module:
 wasm-pack build --target web --out-dir pkg --release
 ```
 
-Then use the WASM module in your project.
+Then use the WASM module in your project:
+
+```js
+import init, { process_image } from "./pkg/spritefusion_pixel_snapper.js";
+
+await init();
+
+// process_image(inputBytes, kColors?, pixelSizeOverride?)
+const outputBytes = process_image(inputBytes, 16);
+```
+
+Pass `null` for any optional argument you want to leave on its default behavior.
 
 ## Acknowledgments
 
