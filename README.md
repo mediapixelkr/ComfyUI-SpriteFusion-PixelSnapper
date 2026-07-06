@@ -38,6 +38,7 @@ A tool to snap pixels to a perfect grid. Designed to fix messy and inconsistent 
 <img src="./static/desktop.webp" alt="Desktop" style="width: 100%;">
 
 A standalone build of Pixel Snapper coming with these features:
+
 - Fast batch processing
 - 100% offline desktop app
 - One-time purchase, yours forever!
@@ -110,9 +111,9 @@ Pass `null` for any optional argument you want to leave on its default behavior.
 
 ## Acknowledgments
 
-Pixel Snapper is a [Sprite Fusion](https://spritefusion.com) project. Sprite Fusion is a free, web-based tilemap editor for game developers supporting a wide range of engines including Unity, Godot, Defold, and GB Studio.
+Pixel Snapper is a [Sprite Fusion](https://www.spritefusion.com/pixel-art-generator) project. Sprite Fusion is a tool to generate TRUE pixel art sprites and animations for game development.
 
-<img src="./static/spritefusion.webp" alt="Sprite Fusion" style="width: 100%;">
+<img src="./static/spritefusion-generator.webp" alt="Sprite Fusion Pixel Art Generator" style="width: 100%;">
 
 ## License
 
