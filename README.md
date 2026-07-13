@@ -33,20 +33,6 @@ A tool to snap pixels to a perfect grid. Designed to fix messy and inconsistent 
 
 <br>
 
-## Desktop Application
-
-<img src="./static/desktop.webp" alt="Desktop" style="width: 100%;">
-
-A standalone build of Pixel Snapper coming with these features:
-
-- Fast batch processing
-- 100% offline desktop app
-- One-time purchase, yours forever!
-- Free lifetime updates
-- Works on Mac, Linux, and Windows
-
-[Download the desktop application](https://www.spritefusion.com/pixel-snapper#desktop-edition)
-
 ## Build from source
 
 Requires [Rust](https://www.rust-lang.org/) installed on your machine.
