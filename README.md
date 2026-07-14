@@ -1,5 +1,9 @@
 # Sprite Fusion Pixel Snapper
 
+<p align="center">
+  <img src="./static/repo_od.png" alt="Pixel Snapper" width="320">
+</p>
+
 - **Online version**: https://spritefusion.com/pixel-snapper
 - **Desktop version**: https://www.spritefusion.com/pixel-snapper#desktop-edition
 
