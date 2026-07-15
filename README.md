@@ -39,9 +39,34 @@ SpriteFusion Pixel Snapper:
 
 ## Installation
 
-### ComfyUI Manager: Git URL
+### ComfyUI Registry / Manager (recommended)
 
-Open **ComfyUI Manager**, choose **Install via Git URL**, and enter:
+Open **ComfyUI Manager**, search for the following display name, and click
+**Install**:
+
+```text
+SpriteFusion Pixel Snapper (Rust)
+```
+
+The immutable Registry package identifier is:
+
+```text
+spritefusion-pixel-snapper-rust
+```
+
+It can also be installed with [comfy-cli](https://github.com/Comfy-Org/comfy-cli):
+
+```bash
+comfy node install spritefusion-pixel-snapper-rust
+```
+
+Do not confuse it with similarly named Python ports. This package is published by
+`mediapixel` and uses the original Rust processing engine plus the ComfyUI-specific
+output, transparency, and cell-sampling features documented below.
+
+### ComfyUI Manager: Git URL fallback
+
+If Registry installation is unavailable, choose **Install via Git URL** and enter:
 
 ```text
 https://github.com/mediapixelkr/ComfyUI-SpriteFusion-PixelSnapper.git
