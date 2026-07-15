@@ -39,19 +39,21 @@ to load the graph.
 
 ### ComfyUI Manager: Git URL
 
-Install [Rust](https://rustup.rs/) first and make sure `cargo --version` works in the
-environment used to start ComfyUI. Then open **ComfyUI Manager**, choose
-**Install via Git URL**, and enter:
+Open **ComfyUI Manager**, choose **Install via Git URL**, and enter:
 
 ```text
 https://github.com/mediapixelkr/ComfyUI-SpriteFusion-PixelSnapper.git
 ```
 
-The repository contains an `install.py` script that runs `cargo build --release`.
-Restart ComfyUI after installation.
+The installer downloads the matching prebuilt binary from the latest
+[GitHub Release](https://github.com/mediapixelkr/ComfyUI-SpriteFusion-PixelSnapper/releases/latest)
+on Windows x86-64, Linux x86-64, and macOS Intel or Apple Silicon. If no compatible
+binary is available, it falls back to `cargo build --release`. Restart ComfyUI after
+installation.
 
-> On Windows, the standard Rust MSVC toolchain may also require the Visual Studio
-> Build Tools with the **Desktop development with C++** workload and a Windows SDK.
+> Source builds require [Rust](https://rustup.rs/). On Windows, the Rust MSVC
+> toolchain may also require the Visual Studio Build Tools with the **Desktop
+> development with C++** workload and a Windows SDK.
 
 ### Manual installation
 
@@ -70,6 +72,10 @@ If the executable is stored elsewhere, set `SPRITEFUSION_PIXEL_SNAPPER_BIN` to i
 full path before starting ComfyUI.
 
 ## Node inputs
+
+<p align="center">
+  <img src="./static/comfyui-node.png" alt="SpriteFusion Pixel Snapper custom node" width="300">
+</p>
 
 | Input | Purpose |
 | --- | --- |
