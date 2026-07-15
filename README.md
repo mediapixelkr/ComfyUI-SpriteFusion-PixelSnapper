@@ -63,6 +63,9 @@ Restart ComfyUI and add **SpriteFusion Pixel Snapper** from
 - The `mask` output follows ComfyUI semantics: white is transparent and black is
   opaque. Use it when saving a transparent PNG or compositing the sprite.
 - `key_color_used` reports the automatically selected color for verification.
+- `cell_method` selects one representative color per detected cell: `majority`
+  is the most stable, `center` preserves the center sample, and `center_weighted`
+  keeps majority voting while giving progressively more influence to central pixels.
 - `output_mode` controls the final geometry: crop or pad to the input aspect ratio,
   keep the detected grid, or resize to an exact size. Cropping is the default and
   turns a detected `64x65` grid from a square input into `64x64`.
@@ -106,6 +109,14 @@ cargo run sprites/batch_inputs sprites/batch_outputs 16 --pixel-size 8
 ```
 
 This is useful when the auto-detection doesn't match the expected grid size. The value must be between 1 and half the smallest image dimension.
+
+Choose how each grid cell is sampled with `--cell-method`:
+
+```bash
+cargo run input.png output.png 16 --cell-method center_weighted
+```
+
+Accepted values are `majority` (default), `center_weighted`, and `center`.
 
 ### 🌐 Web (WASM)
 

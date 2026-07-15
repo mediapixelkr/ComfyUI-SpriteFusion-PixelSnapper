@@ -189,6 +189,9 @@ class SpriteFusionPixelSnapper:
                     "INT",
                     {"default": 32, "min": 0, "max": 255},
                 ),
+                "cell_method": (
+                    ["majority", "center_weighted", "center"],
+                ),
             }
         }
 
@@ -211,6 +214,7 @@ class SpriteFusionPixelSnapper:
         transparency,
         key_color,
         key_tolerance,
+        cell_method,
         output_mode,
         output_scale,
         exact_width,
@@ -231,6 +235,7 @@ class SpriteFusionPixelSnapper:
                 input_image.save(input_path)
 
                 command = [str(binary), str(input_path), str(output_path), str(colors)]
+                command.extend(("--cell-method", cell_method))
                 if pixel_size > 0:
                     command.extend(("--pixel-size", str(pixel_size)))
 

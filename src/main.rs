@@ -17,11 +17,30 @@ use std::path::{Path, PathBuf};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+#[derive(Debug, Clone, Copy)]
+pub enum CellSampling {
+    Majority,
+    Center,
+    CenterWeighted,
+}
+
+impl CellSampling {
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "majority" => Some(Self::Majority),
+            "center" => Some(Self::Center),
+            "center_weighted" => Some(Self::CenterWeighted),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Config {
     pub k_colors: usize,
     pub pixel_size_override: Option<f64>,
+    cell_sampling: CellSampling,
     k_seed: u64,
     /// Input image path only used for CLI use
     #[allow(dead_code)]
@@ -57,6 +76,7 @@ impl Default for Config {
             fallback_target_segments: 64,
             max_step_ratio: 1.8, // Lowered from 3.0 to catch more skew cases
             pixel_size_override: None,
+            cell_sampling: CellSampling::Majority,
         }
     }
 }
@@ -111,6 +131,7 @@ pub struct BatchConfig {
     pub output_dir: PathBuf,
     pub k_colors: usize,
     pub pixel_size_override: Option<f64>,
+    pub cell_sampling: CellSampling,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -121,6 +142,7 @@ impl From<&Config> for BatchConfig {
             output_dir: PathBuf::from(&config.output_path),
             k_colors: config.k_colors,
             pixel_size_override: config.pixel_size_override,
+            cell_sampling: config.cell_sampling,
         }
     }
 }
@@ -131,6 +153,7 @@ impl From<&BatchConfig> for Config {
         Self {
             k_colors: config.k_colors,
             pixel_size_override: config.pixel_size_override,
+            cell_sampling: config.cell_sampling,
             ..Default::default()
         }
     }
@@ -224,7 +247,7 @@ fn process_image_common(input_bytes: &[u8], config: Option<Config>) -> Result<Pr
         &config,
     );
 
-    let output_img = resample(&quantized_img, &col_cuts, &row_cuts)?;
+    let output_img = resample(&quantized_img, &col_cuts, &row_cuts, config.cell_sampling)?;
 
     // Returns bytes for both implementations
     let mut output_bytes = Vec::new();
@@ -283,6 +306,17 @@ fn parse_args() -> Option<Config> {
     let mut i = 3;
     while i < args.len() {
         match args[i].as_str() {
+            "--cell-method" => {
+                let Some(val) = args.get(i + 1) else {
+                    eprintln!("Warning: --cell-method requires a value");
+                    break;
+                };
+                match CellSampling::from_str(val) {
+                    Some(method) => config.cell_sampling = method,
+                    None => eprintln!("Warning: invalid --cell-method '{}', using majority", val),
+                }
+                i += 2;
+            }
             "--pixel-size" => {
                 let Some(val) = args.get(i + 1) else {
                     eprintln!("Warning: --pixel-size requires a value");
@@ -1156,7 +1190,12 @@ fn snap_uniform_cuts(
     cuts
 }
 
-fn resample(img: &RgbaImage, cols: &[usize], rows: &[usize]) -> Result<RgbaImage> {
+fn resample(
+    img: &RgbaImage,
+    cols: &[usize],
+    rows: &[usize],
+    cell_sampling: CellSampling,
+) -> Result<RgbaImage> {
     if cols.len() < 2 || rows.len() < 2 {
         return Err(PixelSnapperError::ProcessingError(
             "Insufficient grid cuts for resampling".to_string(),
@@ -1178,13 +1217,33 @@ fn resample(img: &RgbaImage, cols: &[usize], rows: &[usize]) -> Result<RgbaImage
                 continue;
             }
 
+            if matches!(cell_sampling, CellSampling::Center) {
+                let center_x = xs + (xe - xs - 1) / 2;
+                let center_y = ys + (ye - ys - 1) / 2;
+                if center_x < img.width() as usize && center_y < img.height() as usize {
+                    final_img.put_pixel(
+                        x_i as u32,
+                        y_i as u32,
+                        *img.get_pixel(center_x as u32, center_y as u32),
+                    );
+                }
+                continue;
+            }
+
             let mut counts: HashMap<[u8; 4], usize> = HashMap::new();
 
             for y in ys..ye {
                 for x in xs..xe {
                     if x < img.width() as usize && y < img.height() as usize {
                         let p = img.get_pixel(x as u32, y as u32).0;
-                        *counts.entry(p).or_insert(0) += 1;
+                        let weight = if matches!(cell_sampling, CellSampling::CenterWeighted) {
+                            let edge_x = (x - xs).min(xe - 1 - x);
+                            let edge_y = (y - ys).min(ye - 1 - y);
+                            1 + 2 * edge_x.min(edge_y)
+                        } else {
+                            1
+                        };
+                        *counts.entry(p).or_insert(0) += weight;
                     }
                 }
             }
@@ -1209,4 +1268,30 @@ fn resample(img: &RgbaImage, cols: &[usize], rows: &[usize]) -> Result<RgbaImage
         }
     }
     Ok(final_img)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cell_sampling_methods_choose_expected_pixels() {
+        let red = Rgba([255, 0, 0, 255]);
+        let blue = Rgba([0, 0, 255, 255]);
+        let mut image = RgbaImage::from_pixel(8, 8, red);
+        for y in 2..6 {
+            for x in 2..6 {
+                image.put_pixel(x, y, blue);
+            }
+        }
+        let cuts = [0, 8];
+
+        let majority = resample(&image, &cuts, &cuts, CellSampling::Majority).unwrap();
+        let center = resample(&image, &cuts, &cuts, CellSampling::Center).unwrap();
+        let weighted = resample(&image, &cuts, &cuts, CellSampling::CenterWeighted).unwrap();
+
+        assert_eq!(*majority.get_pixel(0, 0), red);
+        assert_eq!(*center.get_pixel(0, 0), blue);
+        assert_eq!(*weighted.get_pixel(0, 0), blue);
+    }
 }
