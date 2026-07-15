@@ -21,3 +21,4 @@ Issues = "https://github.com/mediapixelkr/ComfyUI-SpriteFusion-PixelSnapper/issu
 PublisherId = "mediapixel"
 DisplayName = "SpriteFusion Pixel Snapper (Rust)"
 Icon = "https://raw.githubusercontent.com/mediapixelkr/ComfyUI-SpriteFusion-PixelSnapper/main/static/icon.png"
+Banner = "https://raw.githubusercontent.com/mediapixelkr/ComfyUI-SpriteFusion-PixelSnapper/main/static/banner.png"
