@@ -39,6 +39,39 @@ def _to_tensor(image: Image.Image) -> torch.Tensor:
     return torch.from_numpy(array)
 
 
+def _parse_hex_color(value: str) -> tuple[int, int, int]:
+    value = value.strip().lstrip("#")
+    if len(value) == 3:
+        value = "".join(character * 2 for character in value)
+    if len(value) != 6:
+        raise ValueError("key_color must use #RRGGBB or #RGB format")
+    try:
+        return tuple(int(value[index : index + 2], 16) for index in (0, 2, 4))
+    except ValueError as error:
+        raise ValueError("key_color contains invalid hexadecimal digits") from error
+
+
+def _apply_chroma_key(
+    image: Image.Image, key_color: str, tolerance: int
+) -> Image.Image:
+    rgb = np.asarray(image.convert("RGB"), dtype=np.int16)
+    if key_color.strip().lower() == "auto":
+        key = rgb[0, 0]
+    else:
+        key = np.asarray(_parse_hex_color(key_color), dtype=np.int16)
+    transparent = np.max(np.abs(rgb - key), axis=2) <= tolerance
+    alpha = np.where(transparent, 0, 255).astype(np.uint8)
+    rgba = np.dstack((rgb.astype(np.uint8), alpha))
+    return Image.fromarray(rgba, "RGBA")
+
+
+def _to_mask(image: Image.Image) -> torch.Tensor:
+    if image.mode == "RGBA":
+        alpha = np.asarray(image.getchannel("A"), dtype=np.float32) / 255.0
+        return torch.from_numpy(1.0 - alpha)
+    return torch.zeros((image.height, image.width), dtype=torch.float32)
+
+
 def _crop_to_aspect(image: Image.Image, target_ratio: float) -> Image.Image:
     width, height = image.size
     if width / height > target_ratio:
@@ -123,11 +156,20 @@ class SpriteFusionPixelSnapper:
                     "INT",
                     {"default": 256, "min": 1, "max": 16384},
                 ),
+                "transparency": (["chroma_key", "none"],),
+                "key_color": (
+                    "STRING",
+                    {"default": "auto"},
+                ),
+                "key_tolerance": (
+                    "INT",
+                    {"default": 32, "min": 0, "max": 255},
+                ),
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "INT", "INT")
-    RETURN_NAMES = ("image", "grid_width", "grid_height")
+    RETURN_TYPES = ("IMAGE", "INT", "INT", "MASK")
+    RETURN_NAMES = ("image", "grid_width", "grid_height", "mask")
     FUNCTION = "snap"
     CATEGORY = "image/pixel art"
 
@@ -136,6 +178,9 @@ class SpriteFusionPixelSnapper:
         image,
         colors,
         pixel_size,
+        transparency,
+        key_color,
+        key_tolerance,
         output_mode,
         output_scale,
         exact_width,
@@ -143,6 +188,7 @@ class SpriteFusionPixelSnapper:
     ):
         binary = _binary_path()
         outputs = []
+        masks = []
         dimensions = []
 
         with tempfile.TemporaryDirectory(prefix="comfyui-pixel-snapper-") as temp:
@@ -151,6 +197,10 @@ class SpriteFusionPixelSnapper:
                 input_path = temp / f"input-{index}.png"
                 output_path = temp / f"output-{index}.png"
                 input_image = _to_pil(frame)
+                if transparency == "chroma_key":
+                    input_image = _apply_chroma_key(
+                        input_image, key_color, key_tolerance
+                    )
                 input_image.save(input_path)
 
                 command = [str(binary), str(input_path), str(output_path), str(colors)]
@@ -165,7 +215,9 @@ class SpriteFusionPixelSnapper:
                     raise RuntimeError(f"Pixel Snapper failed on batch item {index}: {detail}")
 
                 with Image.open(output_path) as snapped:
-                    snapped = snapped.convert("RGB")
+                    snapped = snapped.convert(
+                        "RGBA" if transparency == "chroma_key" else "RGB"
+                    )
                     snapped, grid_size = _apply_output_mode(
                         snapped,
                         output_mode,
@@ -175,6 +227,7 @@ class SpriteFusionPixelSnapper:
                         exact_height,
                     )
                     dimensions.append(grid_size)
+                    masks.append(_to_mask(snapped))
                     outputs.append(_to_tensor(snapped.copy()))
 
         shapes = {tuple(item.shape) for item in outputs}
@@ -183,8 +236,16 @@ class SpriteFusionPixelSnapper:
                 "Auto-detection produced different grid sizes within the batch. "
                 "Set pixel_size explicitly or process the images individually."
             )
+        mask_shapes = {tuple(item.shape) for item in masks}
+        if len(mask_shapes) != 1:
+            raise RuntimeError("Transparency masks have different sizes within the batch.")
         grid_width, grid_height = dimensions[0]
-        return (torch.stack(outputs), grid_width, grid_height)
+        return (
+            torch.stack(outputs),
+            grid_width,
+            grid_height,
+            torch.stack(masks),
+        )
 
 
 NODE_CLASS_MAPPINGS = {"SpriteFusionPixelSnapper": SpriteFusionPixelSnapper}
