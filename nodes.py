@@ -197,10 +197,6 @@ class SpriteFusionPixelSnapper:
                 input_path = temp / f"input-{index}.png"
                 output_path = temp / f"output-{index}.png"
                 input_image = _to_pil(frame)
-                if transparency == "chroma_key":
-                    input_image = _apply_chroma_key(
-                        input_image, key_color, key_tolerance
-                    )
                 input_image.save(input_path)
 
                 command = [str(binary), str(input_path), str(output_path), str(colors)]
@@ -215,9 +211,11 @@ class SpriteFusionPixelSnapper:
                     raise RuntimeError(f"Pixel Snapper failed on batch item {index}: {detail}")
 
                 with Image.open(output_path) as snapped:
-                    snapped = snapped.convert(
-                        "RGBA" if transparency == "chroma_key" else "RGB"
-                    )
+                    snapped = snapped.convert("RGB")
+                    if transparency == "chroma_key":
+                        snapped = _apply_chroma_key(
+                            snapped, key_color, key_tolerance
+                        )
                     snapped, grid_size = _apply_output_mode(
                         snapped,
                         output_mode,
