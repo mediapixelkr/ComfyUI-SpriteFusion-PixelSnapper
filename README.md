@@ -61,7 +61,7 @@ comfy node install spritefusion-pixel-snapper-rust
 ```
 
 Do not confuse it with similarly named Python ports. This package is published by
-`mediapixel` and uses the original Rust processing engine plus the ComfyUI-specific
+`mseraphin` and uses the original Rust processing engine plus the ComfyUI-specific
 output, transparency, and cell-sampling features documented below.
 
 ### ComfyUI Manager: Git URL fallback
