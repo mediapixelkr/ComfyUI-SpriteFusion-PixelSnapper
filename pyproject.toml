@@ -1,0 +1,23 @@
+[project]
+name = "spritefusion-pixel-snapper-rust"
+version = "0.1.0"
+description = "Rust-powered ComfyUI node for correcting inconsistent AI-generated pixel art grids."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = []
+classifiers = [
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+]
+
+[project.urls]
+Repository = "https://github.com/mediapixelkr/ComfyUI-SpriteFusion-PixelSnapper"
+Documentation = "https://github.com/mediapixelkr/ComfyUI-SpriteFusion-PixelSnapper#readme"
+Issues = "https://github.com/mediapixelkr/ComfyUI-SpriteFusion-PixelSnapper/issues"
+
+[tool.comfy]
+PublisherId = "mediapixel"
+DisplayName = "SpriteFusion Pixel Snapper (Rust)"
+Icon = "https://raw.githubusercontent.com/mediapixelkr/ComfyUI-SpriteFusion-PixelSnapper/main/static/icon.png"
