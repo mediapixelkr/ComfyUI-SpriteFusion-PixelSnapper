@@ -1,4 +1,5 @@
 import os
+import math
 import subprocess
 import tempfile
 from pathlib import Path
@@ -38,6 +39,58 @@ def _to_tensor(image: Image.Image) -> torch.Tensor:
     return torch.from_numpy(array)
 
 
+def _crop_to_aspect(image: Image.Image, target_ratio: float) -> Image.Image:
+    width, height = image.size
+    if width / height > target_ratio:
+        new_width = max(1, min(width, round(height * target_ratio)))
+        left = (width - new_width) // 2
+        return image.crop((left, 0, left + new_width, height))
+    new_height = max(1, min(height, round(width / target_ratio)))
+    top = (height - new_height) // 2
+    return image.crop((0, top, width, top + new_height))
+
+
+def _pad_to_aspect(image: Image.Image, target_ratio: float) -> Image.Image:
+    width, height = image.size
+    if width / height > target_ratio:
+        new_width = width
+        new_height = max(height, math.ceil(width / target_ratio))
+    else:
+        new_width = max(width, math.ceil(height * target_ratio))
+        new_height = height
+
+    padded = Image.new(image.mode, (new_width, new_height), image.getpixel((0, 0)))
+    padded.paste(image, ((new_width - width) // 2, (new_height - height) // 2))
+    return padded
+
+
+def _apply_output_mode(
+    image: Image.Image,
+    mode: str,
+    input_size: tuple[int, int],
+    output_scale: int,
+    exact_width: int,
+    exact_height: int,
+) -> tuple[Image.Image, tuple[int, int]]:
+    input_width, input_height = input_size
+    target_ratio = input_width / input_height
+
+    if mode == "crop_to_input_aspect":
+        image = _crop_to_aspect(image, target_ratio)
+    elif mode == "pad_to_input_aspect":
+        image = _pad_to_aspect(image, target_ratio)
+
+    grid_size = image.size
+    if mode == "exact_size":
+        image = image.resize((exact_width, exact_height), Image.Resampling.NEAREST)
+    elif output_scale != 1:
+        image = image.resize(
+            (image.width * output_scale, image.height * output_scale),
+            Image.Resampling.NEAREST,
+        )
+    return image, grid_size
+
+
 class SpriteFusionPixelSnapper:
     @classmethod
     def INPUT_TYPES(cls):
@@ -49,9 +102,26 @@ class SpriteFusionPixelSnapper:
                     "FLOAT",
                     {"default": 0.0, "min": 0.0, "max": 1024.0, "step": 0.1},
                 ),
+                "output_mode": (
+                    [
+                        "crop_to_input_aspect",
+                        "detected",
+                        "pad_to_input_aspect",
+                        "exact_size",
+                    ],
+                    {"default": "crop_to_input_aspect"},
+                ),
                 "output_scale": (
                     "INT",
                     {"default": 1, "min": 1, "max": 64},
+                ),
+                "exact_width": (
+                    "INT",
+                    {"default": 256, "min": 1, "max": 16384},
+                ),
+                "exact_height": (
+                    "INT",
+                    {"default": 256, "min": 1, "max": 16384},
                 ),
             }
         }
@@ -61,7 +131,16 @@ class SpriteFusionPixelSnapper:
     FUNCTION = "snap"
     CATEGORY = "image/pixel art"
 
-    def snap(self, image, colors, pixel_size, output_scale):
+    def snap(
+        self,
+        image,
+        colors,
+        pixel_size,
+        output_mode,
+        output_scale,
+        exact_width,
+        exact_height,
+    ):
         binary = _binary_path()
         outputs = []
         dimensions = []
@@ -71,7 +150,8 @@ class SpriteFusionPixelSnapper:
             for index, frame in enumerate(image):
                 input_path = temp / f"input-{index}.png"
                 output_path = temp / f"output-{index}.png"
-                _to_pil(frame).save(input_path)
+                input_image = _to_pil(frame)
+                input_image.save(input_path)
 
                 command = [str(binary), str(input_path), str(output_path), str(colors)]
                 if pixel_size > 0:
@@ -86,12 +166,15 @@ class SpriteFusionPixelSnapper:
 
                 with Image.open(output_path) as snapped:
                     snapped = snapped.convert("RGB")
-                    dimensions.append(snapped.size)
-                    if output_scale != 1:
-                        snapped = snapped.resize(
-                            (snapped.width * output_scale, snapped.height * output_scale),
-                            Image.Resampling.NEAREST,
-                        )
+                    snapped, grid_size = _apply_output_mode(
+                        snapped,
+                        output_mode,
+                        input_image.size,
+                        output_scale,
+                        exact_width,
+                        exact_height,
+                    )
+                    dimensions.append(grid_size)
                     outputs.append(_to_tensor(snapped.copy()))
 
         shapes = {tuple(item.shape) for item in outputs}

@@ -55,8 +55,13 @@ Restart ComfyUI and add **SpriteFusion Pixel Snapper** from
 
 - `colors` controls palette quantization.
 - `pixel_size = 0` uses automatic grid detection; any positive value overrides it.
-- `output_scale = 1` returns one image pixel per detected grid cell. Higher values
-  enlarge that corrected result with nearest-neighbor sampling.
+- `output_mode` controls the final geometry: crop or pad to the input aspect ratio,
+  keep the detected grid, or resize to an exact size. Cropping is the default and
+  turns a detected `64x65` grid from a square input into `64x64`.
+- `output_scale = 1` returns one image pixel per corrected grid cell. Higher values
+  enlarge that result with nearest-neighbor sampling. It is ignored by `exact_size`.
+- `exact_width` and `exact_height` are only used by `exact_size`. This mode can
+  distort the grid when its aspect ratio differs from the detected result.
 - The `grid_width` and `grid_height` outputs expose the detected low-resolution grid.
 
 For a binary built elsewhere, set the environment variable
