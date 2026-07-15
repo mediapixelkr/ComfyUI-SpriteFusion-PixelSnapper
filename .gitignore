@@ -1,4 +1,6 @@
-/target
-/samples
-/pkg
+__pycache__/
+*.py[cod]
+/target/
+/samples/
+/pkg/
 .DS_Store

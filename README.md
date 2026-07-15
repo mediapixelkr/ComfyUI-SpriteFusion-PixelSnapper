@@ -41,6 +41,27 @@ A tool to snap pixels to a perfect grid. Designed to fix messy and inconsistent 
 
 Requires [Rust](https://www.rust-lang.org/) installed on your machine.
 
+## ComfyUI custom node
+
+Clone this repository into `ComfyUI/custom_nodes`, then build the Rust engine:
+
+```bash
+cd ComfyUI/custom_nodes/spritefusion-pixel-snapper
+cargo build --release
+```
+
+Restart ComfyUI and add **SpriteFusion Pixel Snapper** from
+`image/pixel art`.
+
+- `colors` controls palette quantization.
+- `pixel_size = 0` uses automatic grid detection; any positive value overrides it.
+- `output_scale = 1` returns one image pixel per detected grid cell. Higher values
+  enlarge that corrected result with nearest-neighbor sampling.
+- The `grid_width` and `grid_height` outputs expose the detected low-resolution grid.
+
+For a binary built elsewhere, set the environment variable
+`SPRITEFUSION_PIXEL_SNAPPER_BIN` to its full path before starting ComfyUI.
+
 ### 💻 CLI
 
 ```bash
