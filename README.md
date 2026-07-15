@@ -8,9 +8,15 @@ This custom node integrates the Rust engine from
 and adds ComfyUI image batches, aspect-aware outputs, chroma-key transparency,
 multiple cell sampling methods, and nearest-neighbor previews.
 
+## Example workflow
+
 <p align="center">
-  <img src="./static/comfyui-before-after.gif" alt="AI pixel art before and after grid snapping" width="512">
+  <img src="./static/comfyui-workflow.png" alt="Krea 2 and SpriteFusion Pixel Snapper workflow in ComfyUI" width="100%">
 </p>
+
+The included [Krea 2 workflow](./Workflows/SpriteFusion__Krea2.png) is stored in a
+PNG with embedded ComfyUI metadata. Download it and drag it onto the ComfyUI canvas
+to load the graph.
 
 ## Why use it?
 
@@ -25,15 +31,11 @@ SpriteFusion Pixel Snapper:
 - optionally removes a generated chroma-key background;
 - returns a true low-resolution asset or a crisp nearest-neighbor preview.
 
-## Example workflow
+## Before and after
 
 <p align="center">
-  <img src="./static/comfyui-workflow.png" alt="Krea 2 and SpriteFusion Pixel Snapper workflow in ComfyUI" width="100%">
+  <img src="./static/comfyui-before-after.gif" alt="AI pixel art before and after grid snapping" width="512">
 </p>
-
-The included [Krea 2 workflow](./Workflows/SpriteFusion__Krea2.png) is stored in a
-PNG with embedded ComfyUI metadata. Download it and drag it onto the ComfyUI canvas
-to load the graph.
 
 ## Installation
 
