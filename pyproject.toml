@@ -18,7 +18,7 @@ Documentation = "https://github.com/mediapixelkr/ComfyUI-SpriteFusion-PixelSnapp
 Issues = "https://github.com/mediapixelkr/ComfyUI-SpriteFusion-PixelSnapper/issues"
 
 [tool.comfy]
-PublisherId = "mediapixel"
+PublisherId = "mseraphin"
 DisplayName = "SpriteFusion Pixel Snapper (Rust)"
 Icon = "https://raw.githubusercontent.com/mediapixelkr/ComfyUI-SpriteFusion-PixelSnapper/main/static/icon.png"
 Banner = "https://raw.githubusercontent.com/mediapixelkr/ComfyUI-SpriteFusion-PixelSnapper/main/static/banner.png"
