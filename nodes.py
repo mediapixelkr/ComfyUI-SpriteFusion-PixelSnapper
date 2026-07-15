@@ -2,6 +2,7 @@ import os
 import math
 import subprocess
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -52,17 +53,40 @@ def _parse_hex_color(value: str) -> tuple[int, int, int]:
 
 
 def _apply_chroma_key(
-    image: Image.Image, key_color: str, tolerance: int
+    image: Image.Image, key_color: tuple[int, int, int], tolerance: int
 ) -> Image.Image:
     rgb = np.asarray(image.convert("RGB"), dtype=np.int16)
-    if key_color.strip().lower() == "auto":
-        key = rgb[0, 0]
-    else:
-        key = np.asarray(_parse_hex_color(key_color), dtype=np.int16)
+    key = np.asarray(key_color, dtype=np.int16)
     transparent = np.max(np.abs(rgb - key), axis=2) <= tolerance
     alpha = np.where(transparent, 0, 255).astype(np.uint8)
     rgba = np.dstack((rgb.astype(np.uint8), alpha))
     return Image.fromarray(rgba, "RGBA")
+
+
+def _detect_background_color(image: Image.Image) -> tuple[int, int, int]:
+    rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    height, width = rgb.shape[:2]
+    patch_size = max(1, min(8, min(width, height) // 16))
+    patches = (
+        rgb[:patch_size, :patch_size],
+        rgb[:patch_size, width - patch_size :],
+        rgb[height - patch_size :, :patch_size],
+        rgb[height - patch_size :, width - patch_size :],
+    )
+    counts = [Counter(map(tuple, patch.reshape(-1, 3))) for patch in patches]
+    candidates = set().union(*(counter.keys() for counter in counts))
+    return max(
+        candidates,
+        key=lambda color: (
+            sum(color in counter for counter in counts),
+            sum(counter[color] for counter in counts),
+            color,
+        ),
+    )
+
+
+def _format_color(color: tuple[int, int, int]) -> str:
+    return "#{:02X}{:02X}{:02X}".format(*color)
 
 
 def _to_mask(image: Image.Image) -> torch.Tensor:
@@ -168,8 +192,14 @@ class SpriteFusionPixelSnapper:
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "INT", "INT", "MASK")
-    RETURN_NAMES = ("image", "grid_width", "grid_height", "mask")
+    RETURN_TYPES = ("IMAGE", "INT", "INT", "MASK", "STRING")
+    RETURN_NAMES = (
+        "image",
+        "grid_width",
+        "grid_height",
+        "mask",
+        "key_color_used",
+    )
     FUNCTION = "snap"
     CATEGORY = "image/pixel art"
 
@@ -190,6 +220,7 @@ class SpriteFusionPixelSnapper:
         outputs = []
         masks = []
         dimensions = []
+        key_colors = []
 
         with tempfile.TemporaryDirectory(prefix="comfyui-pixel-snapper-") as temp:
             temp = Path(temp)
@@ -213,9 +244,17 @@ class SpriteFusionPixelSnapper:
                 with Image.open(output_path) as snapped:
                     snapped = snapped.convert("RGB")
                     if transparency == "chroma_key":
-                        snapped = _apply_chroma_key(
-                            snapped, key_color, key_tolerance
+                        resolved_key = (
+                            _detect_background_color(snapped)
+                            if key_color.strip().lower() == "auto"
+                            else _parse_hex_color(key_color)
                         )
+                        snapped = _apply_chroma_key(
+                            snapped, resolved_key, key_tolerance
+                        )
+                        key_colors.append(_format_color(resolved_key))
+                    else:
+                        key_colors.append("none")
                     snapped, grid_size = _apply_output_mode(
                         snapped,
                         output_mode,
@@ -243,6 +282,7 @@ class SpriteFusionPixelSnapper:
             grid_width,
             grid_height,
             torch.stack(masks),
+            ", ".join(key_colors),
         )
 
 

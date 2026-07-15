@@ -56,12 +56,13 @@ Restart ComfyUI and add **SpriteFusion Pixel Snapper** from
 - `colors` controls palette quantization.
 - `pixel_size = 0` uses automatic grid detection; any positive value overrides it.
 - `transparency = chroma_key` converts pixels near `key_color` to transparency
-  on the corrected low-resolution grid. Use `auto` to sample its top-left background
-  pixel, or enter a hex color such as `#FF00FF`. `key_tolerance` controls the
-  accepted per-channel color distance; use `0` for an exact match and increase it
-  for noisy backgrounds.
+  on the corrected low-resolution grid. Use `auto` to analyze small patches in all
+  four corners and select the color shared by the most corners, or enter a hex color
+  such as `#FF00FF`. `key_tolerance` controls the accepted per-channel color
+  distance; use `0` for an exact match and increase it for noisy backgrounds.
 - The `mask` output follows ComfyUI semantics: white is transparent and black is
   opaque. Use it when saving a transparent PNG or compositing the sprite.
+- `key_color_used` reports the automatically selected color for verification.
 - `output_mode` controls the final geometry: crop or pad to the input aspect ratio,
   keep the detected grid, or resize to an exact size. Cropping is the default and
   turns a detected `64x65` grid from a square input into `64x64`.
