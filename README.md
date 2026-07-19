@@ -5,8 +5,9 @@ consistent pixel grid, directly inside ComfyUI.
 
 This custom node integrates the Rust engine from
 [SpriteFusion Pixel Snapper](https://github.com/Hugo-Dz/spritefusion-pixel-snapper)
-and adds ComfyUI image batches, aspect-aware outputs, chroma-key transparency,
-multiple cell sampling methods, and nearest-neighbor previews.
+and adds ComfyUI image batches, custom palettes, adaptive and uniform grids,
+aspect-aware outputs, connected chroma-key transparency, multiple cell sampling
+methods, and nearest-neighbor previews.
 
 ## Example workflow
 
@@ -14,9 +15,11 @@ multiple cell sampling methods, and nearest-neighbor previews.
   <img src="./static/comfyui-workflow.png" alt="Krea 2 and SpriteFusion Pixel Snapper workflow in ComfyUI" width="100%">
 </p>
 
-The included [Krea 2 workflow](./Workflows/SpriteFusion__Krea2.png) is stored in a
-PNG with embedded ComfyUI metadata. Download it and drag it onto the ComfyUI canvas
-to load the graph.
+The included workflows are PNG files with embedded ComfyUI metadata. Download one
+and drag it onto the ComfyUI canvas to load the graph:
+
+- [Krea 2 — 16-color fantasy palette](./Workflows/SpriteFusion__Krea2.png)
+- [Krea 2 — Game Boy green palette](./Workflows/SpriteFusion__Krea2_GameBoy_Palette.png)
 
 ## Why use it?
 
@@ -112,10 +115,31 @@ full path before starting ComfyUI.
 | `output_mode` | Controls whether the detected grid is kept, cropped, padded, or resized. |
 | `output_scale` | Enlarges each corrected logical pixel by an integer nearest-neighbor factor. |
 | `exact_width`, `exact_height` | Final dimensions used only by `exact_size`. |
-| `transparency` | Keeps the image opaque or removes a chroma-key background. |
+| `transparency` | Keeps the image opaque, removes every matching chroma-key pixel, or removes only matching regions connected to an image edge. |
 | `key_color` | `auto` detects the background from all four corners; a value such as `#FF00FF` forces a color. |
 | `key_tolerance` | Maximum per-channel distance from the key color. `0` is an exact match; `32` is a useful starting point for generated backgrounds. |
 | `cell_method` | Chooses how one representative color is selected from every grid cell. |
+| `custom_palette` | Optional RGB palette. Accepts `#RRGGBB` or `#RGB` colors separated by commas, semicolons, spaces, or line breaks. Leave empty for automatic quantization. |
+| `grid_mode` | `adaptive` lets individual boundaries follow local edges; `uniform` uses one fixed step and one global X/Y phase. |
+
+### Custom palette
+
+`custom_palette` constrains the corrected output to a fixed set of colors. For
+example:
+
+```text
+#0D2B45, #203C56, #544E68, #8D697A
+#D08159, #FFAA5E, #FFD4A3, #FFECD6
+```
+
+Grid analysis still uses the automatic palette controlled by `colors`; the custom
+palette is applied only after the cells have been detected and sampled. A small or
+unusual palette therefore does not interfere with grid detection. Duplicate colors
+are removed and up to 256 distinct colors are accepted.
+
+With chroma-key transparency, `key_color=auto` is recommended because the background
+is also mapped to the custom palette. If a fixed `key_color` is used, that exact color
+must be present in the final palette.
 
 ### Output modes
 
@@ -137,12 +161,31 @@ full path before starting ComfyUI.
 - `center` selects only the central source pixel. It preserves small details but is
   more sensitive to noise and grid misalignment.
 
+### Grid modes
+
+- `adaptive` is the original behavior. Every boundary may move locally to follow
+  image edges. It works well for irregular, blurry pseudo-pixels.
+- `uniform` finds one global phase on each axis, then keeps every interior boundary
+  separated by exactly the detected or requested `pixel_size`. It is intended for
+  generated sprites that already look pixelated but suffer from small alignment
+  inconsistencies. A manual `pixel_size` generally gives the most predictable result.
+
+The uniform mode may retain narrow partial cells along the canvas edges when the best
+grid phase does not begin at coordinate zero. These cells normally contain only the
+background and keep the central sprite aligned.
+
 ### Transparency
 
-Chroma-key transparency is calculated **after** the grid has been corrected, so the
-mask stays aligned with the final pixel blocks. With `key_color=auto`, the node
-examines small patches in all four corners and selects the color shared by the most
-corners.
+Transparency is calculated **after** the grid has been corrected, so the mask stays
+aligned with the final pixel blocks. With `key_color=auto`, the node examines small
+patches in all four corners and selects the color shared by the most corners.
+
+- `connected_chroma_key` is recommended for custom palettes. It flood-fills matching
+  regions from all four image edges. The same color remains opaque when enclosed by
+  the sprite, which protects tabards, capes, highlights, and other internal details.
+- `chroma_key` makes every matching pixel transparent, including matching colors
+  inside the character.
+- `none` returns a fully opaque image and an empty mask.
 
 The `mask` output follows ComfyUI conventions: white is transparent and black is
 opaque. To save an RGBA PNG:
@@ -170,6 +213,8 @@ The original native command remains available:
 cargo run --release -- input.png output.png 16
 cargo run --release -- input.png output.png 16 --pixel-size 8
 cargo run --release -- input.png output.png 16 --cell-method center_weighted
+cargo run --release -- input.png output.png 16 --palette "0d2b45,203c56,ffecd6"
+cargo run --release -- input.png output.png 32 --pixel-size 4 --grid-mode uniform
 ```
 
 Use an input and output directory to process a batch. Accepted cell methods are
@@ -187,7 +232,14 @@ wasm-pack build --target web --out-dir pkg --release
 import init, { process_image } from "./pkg/spritefusion_pixel_snapper.js";
 
 await init();
-const outputBytes = process_image(inputBytes, 16, null);
+const outputBytes = process_image(inputBytes, 16, null, null, null);
+const recoloredBytes = process_image(
+  inputBytes,
+  16,
+  null,
+  "0d2b45,203c56,ffecd6",
+  "uniform",
+);
 ```
 
 ## Credits
@@ -198,6 +250,8 @@ by [Hugo Duprez](https://www.hugoduprez.com/).
 
 The ComfyUI integration, output geometry modes, post-snap chroma key, four-corner
 background detection, masks, and configurable cell sampling were added in this fork.
+Custom palette support was ported from the later upstream implementation and adapted
+to accept multiline palettes in ComfyUI.
 
 ## License
 

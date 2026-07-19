@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+const MAX_PALETTE_COLORS: usize = 256;
+
 #[derive(Debug, Clone, Copy)]
 pub enum CellSampling {
     Majority,
@@ -35,12 +37,30 @@ impl CellSampling {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum GridMode {
+    Adaptive,
+    Uniform,
+}
+
+impl GridMode {
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "adaptive" => Some(Self::Adaptive),
+            "uniform" | "uniform_grid" => Some(Self::Uniform),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Config {
     pub k_colors: usize,
     pub pixel_size_override: Option<f64>,
+    palette: Option<Vec<[u8; 3]>>,
     cell_sampling: CellSampling,
+    grid_mode: GridMode,
     k_seed: u64,
     /// Input image path only used for CLI use
     #[allow(dead_code)]
@@ -77,6 +97,8 @@ impl Default for Config {
             max_step_ratio: 1.8, // Lowered from 3.0 to catch more skew cases
             pixel_size_override: None,
             cell_sampling: CellSampling::Majority,
+            grid_mode: GridMode::Adaptive,
+            palette: None,
         }
     }
 }
@@ -132,6 +154,8 @@ pub struct BatchConfig {
     pub k_colors: usize,
     pub pixel_size_override: Option<f64>,
     pub cell_sampling: CellSampling,
+    pub grid_mode: GridMode,
+    pub palette: Option<Vec<[u8; 3]>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -143,6 +167,8 @@ impl From<&Config> for BatchConfig {
             k_colors: config.k_colors,
             pixel_size_override: config.pixel_size_override,
             cell_sampling: config.cell_sampling,
+            grid_mode: config.grid_mode,
+            palette: config.palette.clone(),
         }
     }
 }
@@ -154,6 +180,8 @@ impl From<&BatchConfig> for Config {
             k_colors: config.k_colors,
             pixel_size_override: config.pixel_size_override,
             cell_sampling: config.cell_sampling,
+            grid_mode: config.grid_mode,
+            palette: config.palette.clone(),
             ..Default::default()
         }
     }
@@ -233,21 +261,33 @@ fn process_image_common(input_bytes: &[u8], config: Option<Config>) -> Result<Pr
     // Resolve step sizes. Some instabilities so use sibling axis if one fails, or fallback if both fail
     let (step_x, step_y) = resolve_step_sizes(step_x_opt, step_y_opt, width, height, &config);
 
-    let raw_col_cuts = walk(&profile_x, step_x, width as usize, &config)?;
-    let raw_row_cuts = walk(&profile_y, step_y, height as usize, &config)?;
+    let (col_cuts, row_cuts) = match config.grid_mode {
+        GridMode::Uniform => (
+            strict_uniform_cuts(&profile_x, step_x, width as usize)?,
+            strict_uniform_cuts(&profile_y, step_y, height as usize)?,
+        ),
+        GridMode::Adaptive => {
+            let raw_col_cuts = walk(&profile_x, step_x, width as usize, &config)?;
+            let raw_row_cuts = walk(&profile_y, step_y, height as usize, &config)?;
 
-    // Two-pass stabilization: first pass with raw cuts, then cross-validate
-    let (col_cuts, row_cuts) = stabilize_both_axes(
-        &profile_x,
-        &profile_y,
-        raw_col_cuts,
-        raw_row_cuts,
-        width as usize,
-        height as usize,
-        &config,
-    );
+            // Two-pass stabilization: first pass with raw cuts, then cross-validate
+            stabilize_both_axes(
+                &profile_x,
+                &profile_y,
+                raw_col_cuts,
+                raw_row_cuts,
+                width as usize,
+                height as usize,
+                &config,
+            )
+        }
+    };
 
-    let output_img = resample(&quantized_img, &col_cuts, &row_cuts, config.cell_sampling)?;
+    let snapped_img = resample(&quantized_img, &col_cuts, &row_cuts, config.cell_sampling)?;
+    let output_img = match config.palette.as_deref() {
+        Some(palette) => apply_palette(&snapped_img, palette)?,
+        None => snapped_img,
+    };
 
     // Returns bytes for both implementations
     let mut output_bytes = Vec::new();
@@ -272,6 +312,8 @@ pub fn process_image(
     input_bytes: &[u8],
     k_colors: Option<u32>,
     pixel_size_override: Option<f64>,
+    palette_hex: Option<String>,
+    grid_mode: Option<String>,
 ) -> std::result::Result<Vec<u8>, wasm_bindgen::JsValue> {
     let mut config = Config::default();
     if let Some(k) = k_colors {
@@ -284,6 +326,16 @@ pub fn process_image(
     }
 
     config.pixel_size_override = pixel_size_override;
+    config.palette = palette_hex
+        .as_deref()
+        .map(parse_palette_hex)
+        .transpose()
+        .map_err(wasm_bindgen::JsValue::from)?;
+    if let Some(mode) = grid_mode {
+        config.grid_mode = GridMode::from_str(&mode).ok_or_else(|| {
+            wasm_bindgen::JsValue::from_str("grid_mode must be 'adaptive' or 'uniform'")
+        })?;
+    }
 
     process_image_bytes_common(input_bytes, Some(config))
         .map_err(|e| wasm_bindgen::JsValue::from(e))
@@ -317,6 +369,17 @@ fn parse_args() -> Option<Config> {
                 }
                 i += 2;
             }
+            "--grid-mode" => {
+                let Some(val) = args.get(i + 1) else {
+                    eprintln!("Warning: --grid-mode requires a value");
+                    break;
+                };
+                match GridMode::from_str(val) {
+                    Some(mode) => config.grid_mode = mode,
+                    None => eprintln!("Warning: invalid --grid-mode '{}', using adaptive", val),
+                }
+                i += 2;
+            }
             "--pixel-size" => {
                 let Some(val) = args.get(i + 1) else {
                     eprintln!("Warning: --pixel-size requires a value");
@@ -326,6 +389,18 @@ fn parse_args() -> Option<Config> {
                 match val.parse::<f64>() {
                     Ok(px) if px.is_finite() && px > 0.0 => config.pixel_size_override = Some(px),
                     _ => eprintln!("Warning: invalid --pixel-size '{}', ignoring", val),
+                }
+                i += 2;
+            }
+            "--palette" => {
+                let Some(val) = args.get(i + 1) else {
+                    eprintln!("Warning: --palette requires a value");
+                    break;
+                };
+
+                match parse_palette_hex(val) {
+                    Ok(palette) => config.palette = Some(palette),
+                    Err(error) => eprintln!("Warning: {}, ignoring --palette", error),
                 }
                 i += 2;
             }
@@ -789,6 +864,87 @@ fn quantize_image(img: &RgbaImage, config: &Config) -> Result<RgbaImage> {
     Ok(new_img)
 }
 
+fn parse_palette_hex(value: &str) -> Result<Vec<[u8; 3]>> {
+    let mut seen = std::collections::HashSet::new();
+    let mut palette = Vec::new();
+
+    for part in value
+        .split(|character: char| character == ',' || character == ';' || character.is_whitespace())
+    {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let hex = part.trim_start_matches('#');
+        if hex.len() != 6 || !hex.chars().all(|character| character.is_ascii_hexdigit()) {
+            return Err(PixelSnapperError::InvalidInput(format!(
+                "invalid palette color '{}', expected a 6-digit hex code",
+                part
+            )));
+        }
+        let color = [
+            u8::from_str_radix(&hex[0..2], 16).unwrap(),
+            u8::from_str_radix(&hex[2..4], 16).unwrap(),
+            u8::from_str_radix(&hex[4..6], 16).unwrap(),
+        ];
+        if seen.insert(color) {
+            palette.push(color);
+        }
+    }
+
+    if palette.is_empty() {
+        return Err(PixelSnapperError::InvalidInput(
+            "Palette must contain at least one color".to_string(),
+        ));
+    }
+    if palette.len() > MAX_PALETTE_COLORS {
+        return Err(PixelSnapperError::InvalidInput(format!(
+            "Palette must contain at most {} distinct colors",
+            MAX_PALETTE_COLORS
+        )));
+    }
+    Ok(palette)
+}
+
+fn nearest_palette_color(rgb: [u8; 3], palette: &[[u8; 3]]) -> [u8; 3] {
+    let mut best_color = palette[0];
+    let mut best_distance = u32::MAX;
+    for color in palette {
+        let red = rgb[0] as i32 - color[0] as i32;
+        let green = rgb[1] as i32 - color[1] as i32;
+        let blue = rgb[2] as i32 - color[2] as i32;
+        let distance = (red * red + green * green + blue * blue) as u32;
+        if distance < best_distance {
+            best_distance = distance;
+            best_color = *color;
+        }
+    }
+    best_color
+}
+
+fn apply_palette(img: &RgbaImage, palette: &[[u8; 3]]) -> Result<RgbaImage> {
+    if palette.is_empty() {
+        return Err(PixelSnapperError::InvalidInput(
+            "Palette must contain at least one RGB color".to_string(),
+        ));
+    }
+
+    let mut cache: HashMap<[u8; 3], [u8; 3]> = HashMap::new();
+    let mut recolored_img = RgbaImage::new(img.width(), img.height());
+    for (x, y, pixel) in img.enumerate_pixels() {
+        if pixel[3] == 0 {
+            recolored_img.put_pixel(x, y, *pixel);
+            continue;
+        }
+        let source = [pixel[0], pixel[1], pixel[2]];
+        let color = *cache
+            .entry(source)
+            .or_insert_with(|| nearest_palette_color(source, palette));
+        recolored_img.put_pixel(x, y, Rgba([color[0], color[1], color[2], pixel[3]]));
+    }
+    Ok(recolored_img)
+}
+
 fn compute_profiles(img: &RgbaImage) -> Result<(Vec<f64>, Vec<f64>)> {
     let (w, h) = img.dimensions();
 
@@ -1109,6 +1265,59 @@ fn sanitize_cuts(mut cuts: Vec<usize>, limit: usize) -> Vec<usize> {
     cuts
 }
 
+fn strict_uniform_cuts(profile: &[f64], target_step: f64, limit: usize) -> Result<Vec<usize>> {
+    if limit == 0 {
+        return Ok(vec![0]);
+    }
+    if !target_step.is_finite() || target_step < 1.0 {
+        return Err(PixelSnapperError::InvalidInput(format!(
+            "uniform grid step {:.2} must be finite and at least 1",
+            target_step
+        )));
+    }
+
+    let step = (target_step.round() as usize).clamp(1, limit);
+    if step == 1 {
+        return Ok((0..=limit).collect());
+    }
+
+    // Find one global phase instead of moving every boundary independently. The
+    // winning phase is the one whose regularly spaced boundaries cross the most
+    // edge energy in the analysis profile.
+    let mut best_phase = 0;
+    let mut best_score = f64::NEG_INFINITY;
+    for phase in 0..step {
+        let mut position = if phase == 0 { step } else { phase };
+        let mut score = 0.0;
+        let mut count = 0usize;
+        while position < limit {
+            if let Some(value) = profile.get(position) {
+                score += *value;
+                count += 1;
+            }
+            position = position.saturating_add(step);
+        }
+        let mean_score = if count == 0 {
+            f64::NEG_INFINITY
+        } else {
+            score / count as f64
+        };
+        if mean_score > best_score {
+            best_score = mean_score;
+            best_phase = phase;
+        }
+    }
+
+    let mut cuts = vec![0];
+    let mut position = if best_phase == 0 { step } else { best_phase };
+    while position < limit {
+        cuts.push(position);
+        position = position.saturating_add(step);
+    }
+    cuts.push(limit);
+    Ok(sanitize_cuts(cuts, limit))
+}
+
 fn snap_uniform_cuts(
     profile: &[f64],
     limit: usize,
@@ -1293,5 +1502,32 @@ mod tests {
         assert_eq!(*majority.get_pixel(0, 0), red);
         assert_eq!(*center.get_pixel(0, 0), blue);
         assert_eq!(*weighted.get_pixel(0, 0), blue);
+    }
+
+    #[test]
+    fn palette_parser_accepts_ui_separators_and_removes_duplicates() {
+        let palette = parse_palette_hex("#0d2b45, ffecd6\n0D2B45;29adff").unwrap();
+        assert_eq!(palette, vec![[13, 43, 69], [255, 236, 214], [41, 173, 255]]);
+    }
+
+    #[test]
+    fn custom_palette_is_applied_after_cell_resampling() {
+        let image = RgbaImage::from_pixel(2, 1, Rgba([240, 20, 20, 128]));
+        let recolored = apply_palette(&image, &[[0, 0, 0], [255, 255, 255]]).unwrap();
+        assert_eq!(*recolored.get_pixel(0, 0), Rgba([0, 0, 0, 128]));
+    }
+
+    #[test]
+    fn uniform_grid_uses_one_global_phase_and_constant_interior_step() {
+        let mut profile = vec![0.0; 12];
+        profile[2] = 5.0;
+        profile[6] = 5.0;
+        profile[10] = 5.0;
+
+        let cuts = strict_uniform_cuts(&profile, 4.0, 12).unwrap();
+        assert_eq!(cuts, vec![0, 2, 6, 10, 12]);
+        assert!(cuts[1..cuts.len() - 1]
+            .windows(2)
+            .all(|window| window[1] - window[0] == 4));
     }
 }
