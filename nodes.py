@@ -1,5 +1,6 @@
 import os
 import math
+import re
 import subprocess
 import tempfile
 from collections import Counter
@@ -7,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, ImageDraw
 
 
 ROOT = Path(__file__).resolve().parent
@@ -45,11 +46,26 @@ def _parse_hex_color(value: str) -> tuple[int, int, int]:
     if len(value) == 3:
         value = "".join(character * 2 for character in value)
     if len(value) != 6:
-        raise ValueError("key_color must use #RRGGBB or #RGB format")
+        raise ValueError("color must use #RRGGBB or #RGB format")
     try:
         return tuple(int(value[index : index + 2], 16) for index in (0, 2, 4))
     except ValueError as error:
-        raise ValueError("key_color contains invalid hexadecimal digits") from error
+        raise ValueError("color contains invalid hexadecimal digits") from error
+
+
+def _normalize_palette(value: str) -> str:
+    colors = []
+    seen = set()
+    for item in re.split(r"[,;\s]+", value.strip()):
+        if not item:
+            continue
+        color = _parse_hex_color(item)
+        if color not in seen:
+            seen.add(color)
+            colors.append("{:02X}{:02X}{:02X}".format(*color))
+    if len(colors) > 256:
+        raise ValueError("custom_palette supports at most 256 distinct colors")
+    return ",".join(colors)
 
 
 def _apply_chroma_key(
@@ -59,6 +75,35 @@ def _apply_chroma_key(
     key = np.asarray(key_color, dtype=np.int16)
     transparent = np.max(np.abs(rgb - key), axis=2) <= tolerance
     alpha = np.where(transparent, 0, 255).astype(np.uint8)
+    rgba = np.dstack((rgb.astype(np.uint8), alpha))
+    return Image.fromarray(rgba, "RGBA")
+
+
+def _apply_connected_chroma_key(
+    image: Image.Image, key_color: tuple[int, int, int], tolerance: int
+) -> Image.Image:
+    rgb = np.asarray(image.convert("RGB"), dtype=np.int16)
+    key = np.asarray(key_color, dtype=np.int16)
+    candidate = np.max(np.abs(rgb - key), axis=2) <= tolerance
+
+    # Flood-fill only matching regions that touch an image edge. An identical
+    # palette color enclosed by the sprite remains opaque.
+    connectivity = Image.fromarray(
+        np.where(candidate, 255, 0).astype(np.uint8), "L"
+    ).copy()
+    width, height = connectivity.size
+    border = (
+        [(x, 0) for x in range(width)]
+        + [(x, height - 1) for x in range(width)]
+        + [(0, y) for y in range(1, height - 1)]
+        + [(width - 1, y) for y in range(1, height - 1)]
+    )
+    for point in border:
+        if connectivity.getpixel(point) == 255:
+            ImageDraw.floodfill(connectivity, point, 128, thresh=0)
+
+    connected = np.asarray(connectivity, dtype=np.uint8) == 128
+    alpha = np.where(connected, 0, 255).astype(np.uint8)
     rgba = np.dstack((rgb.astype(np.uint8), alpha))
     return Image.fromarray(rgba, "RGBA")
 
@@ -180,7 +225,9 @@ class SpriteFusionPixelSnapper:
                     "INT",
                     {"default": 256, "min": 1, "max": 16384},
                 ),
-                "transparency": (["chroma_key", "none"],),
+                "transparency": (
+                    ["connected_chroma_key", "chroma_key", "none"],
+                ),
                 "key_color": (
                     "STRING",
                     {"default": "auto"},
@@ -191,6 +238,18 @@ class SpriteFusionPixelSnapper:
                 ),
                 "cell_method": (
                     ["majority", "center_weighted", "center"],
+                ),
+                "custom_palette": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "multiline": True,
+                        "placeholder": "Optional: #0D2B45, #FFECD6, #29ADFF",
+                    },
+                ),
+                "grid_mode": (
+                    ["adaptive", "uniform"],
+                    {"default": "adaptive"},
                 ),
             }
         }
@@ -219,8 +278,11 @@ class SpriteFusionPixelSnapper:
         output_scale,
         exact_width,
         exact_height,
+        custom_palette="",
+        grid_mode="adaptive",
     ):
         binary = _binary_path()
+        normalized_palette = _normalize_palette(custom_palette)
         outputs = []
         masks = []
         dimensions = []
@@ -236,8 +298,11 @@ class SpriteFusionPixelSnapper:
 
                 command = [str(binary), str(input_path), str(output_path), str(colors)]
                 command.extend(("--cell-method", cell_method))
+                command.extend(("--grid-mode", grid_mode))
                 if pixel_size > 0:
                     command.extend(("--pixel-size", str(pixel_size)))
+                if normalized_palette:
+                    command.extend(("--palette", normalized_palette))
 
                 result = subprocess.run(
                     command, capture_output=True, text=True, encoding="utf-8", errors="replace"
@@ -248,15 +313,20 @@ class SpriteFusionPixelSnapper:
 
                 with Image.open(output_path) as snapped:
                     snapped = snapped.convert("RGB")
-                    if transparency == "chroma_key":
+                    if transparency in ("connected_chroma_key", "chroma_key"):
                         resolved_key = (
                             _detect_background_color(snapped)
                             if key_color.strip().lower() == "auto"
                             else _parse_hex_color(key_color)
                         )
-                        snapped = _apply_chroma_key(
-                            snapped, resolved_key, key_tolerance
-                        )
+                        if transparency == "connected_chroma_key":
+                            snapped = _apply_connected_chroma_key(
+                                snapped, resolved_key, key_tolerance
+                            )
+                        else:
+                            snapped = _apply_chroma_key(
+                                snapped, resolved_key, key_tolerance
+                            )
                         key_colors.append(_format_color(resolved_key))
                     else:
                         key_colors.append("none")
